@@ -1,86 +1,65 @@
-# 项目名称
-PROJECT(Lua C)
+cmake_minimum_required(VERSION 2.8...3.12)
 
-# CMAKE最小版本号
-CMAKE_MINIMUM_REQUIRED(VERSION 2.6)
+project(lua)
 
-# 忽略BUILD目录的rpath
-set(CMAKE_SKIP_BUILD_RPATH true)
+# set(CMAKE_C_STANDARD 99)
+# set(CMAKE_CXX_STANDARD 11)
 
-# 关闭MacOSX的RPATH
-set(CMAKE_MACOSX_RPATH 0)
+# Lua 头文件
+set(LIBLUA_INCLUDE lua.h luaconf.h lualib.h lauxlib.h lua.hpp)
 
-# 设置CFLAGS
-set(CMAKE_C_FLAGS "-O2 -Wall -Wextra -fPIC -DLUA_COMPAT_5_3 -DLUA_USE_DLOPEN -DLUA_USE_READLINE -DLUA_USE_POSIX")
+file(GLOB LUA_SOURCES lua.c)
+file(GLOB LUAC_SOURCES luac.c)
+file(GLOB LIBLUA_SOURCES l*.c)
+list(REMOVE_ITEM LIBLUA_SOURCES ${LUA_SOURCES})
+list(REMOVE_ITEM LIBLUA_SOURCES ${LUAC_SOURCES})
 
-# 头文件
-set (LUA_HEADERS
-  lua.h
-  luaconf.h
-  lualib.h
-  lauxlib.h
-)
+# 可选C++编译器
+if (USE_CXX)
+  set_source_files_properties(${LUA_SOURCES} ${LUAC_SOURCES} ${LIBLUA_SOURCES} PROPERTIES LANGUAGE CXX)
+endif()
 
-# 依赖库
-set (LUALIB
-  lapi.c
-  lcode.c
-  lctype.c
-  ldebug.c
-  ldo.c
-  ldump.c
-  lfunc.c
-  lgc.c
-  llex.c
-  lmem.c
-  lobject.c
-  lopcodes.c
-  lparser.c
-  lstate.c
-  lstring.c
-  ltable.c
-  ltm.c
-  lundump.c
-  lvm.c
-  lzio.c
-  lauxlib.c
-  lbaselib.c
-  lcorolib.c
-  ldblib.c
-  liolib.c
-  lmathlib.c
-  loadlib.c
-  loslib.c
-  lstrlib.c
-  ltablib.c
-  lutf8lib.c
-  linit.c
-)
+# 生成 Liblua
+add_library(liblua_object OBJECT ${LIBLUA_SOURCES})
 
-# lua解释器
-set (LUA lua.c)
+add_library(liblua STATIC $<TARGET_OBJECTS:liblua_object>)
+if (WIN32)
+  add_library(liblua-dll SHARED $<TARGET_OBJECTS:liblua_object>)
+  target_compile_definitions(liblua-dll PRIVATE LUA_BUILD_AS_DLL LUA_COMPAT_5_3)
+else()
+  add_definitions(-D_GNU_SOURCE -DLUA_USE_POSIX -DLUA_USE_DLOPEN -DLUA_COMPAT_5_3 -fPIC)
+  target_link_libraries(liblua PRIVATE dl PRIVATE m)
+endif()
 
-# lua编译器
-set (LUAC luac.c)
+# Liblua 静态库
+set_target_properties (liblua PROPERTIES PUBLIC_HEADER "${LIBLUA_INCLUDE}" OUTPUT_NAME "liblua" PREFIX "")
+install (TARGETS liblua ARCHIVE DESTINATION lib PUBLIC_HEADER DESTINATION include)
 
-# ======== 编译lua静态库 ========
-ADD_LIBRARY(LUA_STATIC STATIC ${LUALIB})
-TARGET_LINK_LIBRARIES( LUA_STATIC -ldl -lm -lreadline )
-SET_TARGET_PROPERTIES ( LUA_STATIC PROPERTIES OUTPUT_NAME "lua" )
-# ======== 编译核心库 ========
+# Liblua 共享库
+if (WIN32)
+  set_target_properties(liblua-dll PROPERTIES OUTPUT_NAME "liblua" PREFIX "")
+  install(TARGETS liblua-dll LIBRARY DESTINATION lib)
+endif()
 
-# ======== 编译lua动态库 ========
-ADD_LIBRARY(LUA_DYLIB SHARED ${LUALIB})
-TARGET_LINK_LIBRARIES(LUA_DYLIB -ldl -lm -lreadline )
-SET_TARGET_PROPERTIES (LUA_DYLIB PROPERTIES OUTPUT_NAME "lua" )
-# ======== 编译核心库 ========
+# 生成 Lua 可执行文件
+if (LUA_SOURCES)
+  add_executable(lua ${LUA_SOURCES})
+  if (USE_READLINE) # 使用 readline
+    add_definitions(-DLUA_USE_READLINE)
+    target_link_libraries(lua PRIVATE liblua PRIVATE readline)
+  else()
+    target_link_libraries(lua PRIVATE liblua)
+  endif()
+  install(TARGETS lua RUNTIME DESTINATION bin)
+else()
+  message("[Warning]: Unable to generate `lua.exe`, the `lua.c` file cannot be found.")
+endif()
 
-# ======== 编译luac编译器 ========
-add_executable(luac ${LUAC})
-target_link_libraries(luac LUA_DYLIB)
-# ======== 编译内置luaclib库 ========
-
-# ======== 编译Lua解释器 ========
-add_executable(lua ${LUA})
-target_link_libraries(lua LUA_DYLIB)
-# ======== 编译内置luaclib库 ========
+# 生成 Luac 可执行文件
+if(LUAC_SOURCES)
+  add_executable(luac ${LUAC_SOURCES})
+  target_link_libraries(luac PRIVATE liblua)
+  install(TARGETS luac RUNTIME DESTINATION bin)
+else()
+  message("[Warning]: Unable to generate `luac.exe`, the `luac.c` file cannot be found.")
+endif()
