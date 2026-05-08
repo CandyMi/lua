@@ -2,8 +2,8 @@ cmake_minimum_required(VERSION 2.8...3.12)
 
 project(lua)
 
-# set(CMAKE_C_STANDARD 99)
-# set(CMAKE_CXX_STANDARD 11)
+# 打印操作系统
+message("-- Detecting OS: '${CMAKE_SYSTEM_NAME}'")
 
 # Lua 头文件
 set(LIBLUA_INCLUDE lua.h luaconf.h lualib.h lauxlib.h lua.hpp)
@@ -14,9 +14,19 @@ file(GLOB LIBLUA_SOURCES l*.c)
 list(REMOVE_ITEM LIBLUA_SOURCES ${LUA_SOURCES})
 list(REMOVE_ITEM LIBLUA_SOURCES ${LUAC_SOURCES})
 
-# 可选C++编译器
+option(USE_CXX "Force the use of the C++ compiler to build" OFF)
 if (USE_CXX)
   set_source_files_properties(${LUA_SOURCES} ${LUAC_SOURCES} ${LIBLUA_SOURCES} PROPERTIES LANGUAGE CXX)
+  if (CMAKE_CXX_COMPILER_ID MATCHES "Clang") # Clang 编译器会有警告
+    add_compile_options(-Wno-deprecated)
+  endif()
+endif()
+
+# 增加 CCache 支持
+find_program(CCACHE_FOUND ccache)
+if(CCACHE_FOUND)
+  set_property(GLOBAL PROPERTY RULE_LAUNCH_COMPILE ccache)
+  set_property(GLOBAL PROPERTY RULE_LAUNCH_LINK ccache)
 endif()
 
 # 生成 Liblua
@@ -25,9 +35,10 @@ add_library(liblua_object OBJECT ${LIBLUA_SOURCES})
 add_library(liblua STATIC $<TARGET_OBJECTS:liblua_object>)
 if (WIN32)
   add_library(liblua-dll SHARED $<TARGET_OBJECTS:liblua_object>)
-  target_compile_definitions(liblua-dll PRIVATE LUA_BUILD_AS_DLL LUA_COMPAT_5_3)
+  target_compile_definitions(liblua-dll PRIVATE LUA_BUILD_AS_DLL LUA_COMPAT_5_3 LUA_COMPAT_5_2)
 else()
-  add_definitions(-D_GNU_SOURCE -DLUA_USE_POSIX -DLUA_USE_DLOPEN -DLUA_COMPAT_5_3 -fPIC)
+  add_definitions(-DLUA_USE_POSIX -DLUA_USE_DLOPEN -DLUA_COMPAT_5_3 -DLUA_COMPAT_5_2)
+  target_compile_options(liblua PRIVATE -fPIC -pipe)
   target_link_libraries(liblua PRIVATE dl PRIVATE m)
 endif()
 
@@ -42,24 +53,28 @@ if (WIN32)
 endif()
 
 # 生成 Lua 可执行文件
-if (LUA_SOURCES)
+option(WITH_LUA "Generate a `lua` executable file?" ON)
+if (WITH_LUA)
   add_executable(lua ${LUA_SOURCES})
-  if (USE_READLINE) # 使用 readline
+  if (NOT WIN32) # 自动检测是否存在`ReadLine`
+    find_path(READLINE_INC_FOUND NAMES readline/readline.h)
+    find_library(READLINE_LIB_FOUND NAMES readline)
+    find_library(NCURSES_LIB_FOUND NAMES ncurses)
+  endif()
+  if (READLINE_INC_FOUND AND READLINE_LIB_FOUND AND NCURSES_LIB_FOUND)
     add_definitions(-DLUA_USE_READLINE)
-    target_link_libraries(lua PRIVATE liblua PRIVATE readline)
+    include_directories( ${READLINE_INC_FOUND} )
+    target_link_libraries(lua PRIVATE liblua PRIVATE ${NCURSES_LIB_FOUND} ${READLINE_LIB_FOUND})
   else()
     target_link_libraries(lua PRIVATE liblua)
   endif()
   install(TARGETS lua RUNTIME DESTINATION bin)
-else()
-  message("[Warning]: Unable to generate `lua.exe`, the `lua.c` file cannot be found.")
-endif()
+endif(WITH_LUA)
 
 # 生成 Luac 可执行文件
-if(LUAC_SOURCES)
+option(WITH_LUAC "Generate a `luac` executable file?" ON)
+if (WITH_LUAC)
   add_executable(luac ${LUAC_SOURCES})
   target_link_libraries(luac PRIVATE liblua)
   install(TARGETS luac RUNTIME DESTINATION bin)
-else()
-  message("[Warning]: Unable to generate `luac.exe`, the `luac.c` file cannot be found.")
-endif()
+endif(WITH_LUAC)
